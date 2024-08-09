@@ -3,5 +3,9 @@ module Orego
     def between(other)
       Location.new(start_line, start_column, other.end_line, other.end_column)
     end
+
+    def to_s
+      "(#{start_line}:#{start_column}):(#{end_line}:#{end_column})"
+    end
   }
 end

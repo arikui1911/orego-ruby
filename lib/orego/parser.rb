@@ -19,13 +19,29 @@ module Orego
     ArrayLiteral = _[:elements]
     HashLiteral = _[:pairs]
     FunctionLiteral = _[:parameters, :body]
+    InfixedExpression = _[:operator, :left, :right]
+    Call = _[:function, :arguments]
+    IndexAccess = _[:container, :key]
+    Let = _[:left, :right]
 
     module Operator
       %i[
         PLUS
         MINUS
         NOT
-    ].each{|s| const_set s, s }
+
+        EQ
+        NE
+        GE
+        LE
+        GT
+        LT
+        ADD
+        SUB
+        MUL
+        DIV
+        MOD
+      ].each{|s| const_set s, s }
     end
   end
 
@@ -70,13 +86,21 @@ module Orego
     end
 
     def expect(*tags)
+      raise ArgumentError, 'no expected tags given' if tags.empty?
       t = next_token()
-      tags.include?(t.tag) or parse_error(t, "expect #{tags}, but #{t.value.inspect}:#{t.tag}")
+      unless tags.include?(t.tag)
+        ex = if tags.size == 1
+          tags.first
+        else
+          "#{tags[0...-1].join(', ')} or #{tags.last}"
+        end
+        parse_error(t.location, "expect #{ex}, but #{t.value.inspect}:#{t.tag}")
+      end
       t
     end
 
-    def parse_error(token, msg)
-      raise ParseError.new(@filename, token.location, msg)
+    def parse_error(location, msg)
+      raise ParseError.new(@filename, location, msg)
     end
 
     def parse_block
@@ -138,7 +162,7 @@ module Orego
 
     def parse_expression_statement
       x = parse_expression()
-      t = expect(Token::NEWLINE, Token::SEMICOLON)
+      expect(Token::NEWLINE, Token::SEMICOLON)
       AST::ExpressionStatement.new(x.location, x)
     end
 
@@ -167,16 +191,15 @@ module Orego
     @@precedences = {}
 
     private_class_method def self.define_infixed(name, infix_token_and_prec_table, &b)
-      tab = infix_token_and_prec_table.flat_map{|k, v| [*k].map{|t| [t, v] } }.to_h
-      @@precedences.update tab
+      @@precedences.update infix_token_and_prec_table
       m = "parse_#{name}".intern
-      @@infixed_table.update tab.to_h{|k, v| [k, m] }
+      @@infixed_table.update infix_token_and_prec_table.to_h{|k, v| [k, m] }
       define_method(m, &b)
     end
 
     def parse_expression(prec = Precedence::LOWEST)
       t = next_token()
-      m = @@prefixed_table[t.tag] or parse_error(t, "unexpected token on first of expression - #{t.value.inspect}:#{t.tag}")
+      m = @@prefixed_table[t.tag] or parse_error(t.location, "unexpected token on first of expression - #{t.value.inspect}:#{t.tag}")
       left = send(m, t)
       loop do
         t = next_token()
@@ -228,7 +251,7 @@ module Orego
 
     define_prefixed :prefixed, *PREFIX_OPS.keys do |t|
       x = parse_expression(Precedence::PREFIX)
-      AST::PrefixedExpression.new(t.location.between(x), PREFIX_OPS[t.tag], x)
+      AST::PrefixedExpression.new(t.location.between(x.location), PREFIX_OPS[t.tag], x)
     end
 
     define_prefixed :array_literal, Token::LBRACKET do |lb|
@@ -248,34 +271,55 @@ module Orego
 
     define_prefixed :function_literal, Token::ARROW do |arrow|
       t = expect(Token::LPAREN, Token::LBRACE)
-      params = (t.tag == Token::LBRACE ? [] : parse_comma_list(Token::RPAREN){
-        t = expect(Token::IDENTIFIER)
-        AST::Identifier.new(t.location, t.value)
-      })
+      params = if t.tag == Token::LBRACE
+        pushback t
+        []
+      else
+        parse_comma_list(Token::RPAREN){
+          t = expect(Token::IDENTIFIER)
+          AST::Identifier.new(t.location, t.value)
+        }.last
+      end
+      try(Token::NEWLINE) # dispose auto nl when block start next line
       b = parse_block()
       AST::FunctionLiteral.new(arrow.location.between(b.location), params, b)
     end
 
-    define_infixed(
-      :infixed,
-      [Token::EQ, Token::NE] => Precedence::EQUALITY,
-      [Token::GE, Token::LE, Token::GT, Token::LT] => Precedence::COMPARE,
-      [Token::ADD, Token::SUB] => Precedence::ADDITIVE,
-      [Token::MUL, Token::DIV, Token::MOD] => Precedence::MULTIVE,
-    ) do |left, t|
-      raise NotImplementedError
+    INFIX_OPS = {
+      Token::EQ => [AST::Operator::EQ, Precedence::EQUALITY],
+      Token::NE => [AST::Operator::NE, Precedence::EQUALITY],
+      Token::GE => [AST::Operator::GE, Precedence::COMPARE],
+      Token::LE => [AST::Operator::LE, Precedence::COMPARE],
+      Token::GT => [AST::Operator::GT, Precedence::COMPARE],
+      Token::LT => [AST::Operator::LT, Precedence::COMPARE],
+      Token::ADD => [AST::Operator::ADD, Precedence::ADDITIVE],
+      Token::SUB => [AST::Operator::SUB, Precedence::ADDITIVE],
+      Token::MUL => [AST::Operator::MUL, Precedence::MULTIVE],
+      Token::DIV => [AST::Operator::DIV, Precedence::MULTIVE],
+      Token::MOD => [AST::Operator::MOD, Precedence::MULTIVE],
+    }
+
+    define_infixed :infixed, INFIX_OPS.to_h{|k, v| [k, v.last] } do |left, t|
+      right = parse_expression(@@precedences.fetch(t.tag))
+      AST::InfixedExpression.new(left.location.between(right.location), INFIX_OPS[t.tag].first, left, right)
     end
 
-    define_infixed :call, Token::LPAREN => Precedence::CALL do |fn, t|
-      raise NotImplementedError
+    define_infixed :call, Token::LPAREN => Precedence::CALL do |fn, lp|
+      rp, args = parse_comma_list(Token::RPAREN){ parse_expression() }
+      AST::Call.new(fn.location.between(rp.location), fn, args)
     end
 
-    define_infixed :index_access, Token::LBRACKET => Precedence::CALL do |container, t|
-      raise NotImplementedError
+    define_infixed :index_access, Token::LBRACKET => Precedence::CALL do |container, lb|
+      rb, args = parse_comma_list(Token::RBRACKET){ parse_expression() }
+      loc = container.location.between(rb.location)
+      parse_error loc, "invalid index access" unless args.size == 1
+      AST::IndexAccess.new(loc, container, args.first)
     end
 
     define_infixed :let, Token::LET => Precedence::HIGHEST do |left, t|
-      raise NotImplementedError
+      parse_error left.location, "invalid let left part - #{left.class}" unless left.kind_of?(AST::Identifier)
+      right = parse_expression(Precedence::HIGHEST)
+      AST::Let.new(left.location.between(right.location), left, right)
     end
 
     def parse_comma_list(closer)
@@ -292,7 +336,7 @@ module Orego
         when Token::NEWLINE # 字句解析で付けられる改行トークンの処理
           break expect(closer)
         else
-          parse_error t, "unexpected token as delimiter - #{t.value}:#{t.tag}; comma expected"
+          parse_error t.location, "unexpected token as delimiter - #{t.value}:#{t.tag}; comma expected"
         end
 
         t = try(closer) and break t   # 最後の要素の後ろにもカンマを許す
