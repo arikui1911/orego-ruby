@@ -44,7 +44,9 @@ module Orego
       @src.each_line do |line|
         ss.string = line.chomp + "\n"
         m = send(m, ss, lineno) until ss.eos?
-        emit Token::NEWLINE, "\n", lineno, ss.pos-1, lineno, ss.pos-1 if newline_inserting_required?
+        if m == :lex_default && newline_inserting_required?
+          emit Token::NEWLINE, "\n", lineno, ss.pos-1, lineno, ss.pos-1
+        end
         lineno += 1
       end
       emit Token::EOF, nil, lineno, 0, lineno, 0
@@ -164,9 +166,8 @@ module Orego
         emit_direct @string
         return :lex_default
       when ss.scan(/\\(.)/)
-        @string.value << (ESC[ss[1]] || ss[1])
-      when ss.scan(/\\/)
-        @string.value << ss.matched
+        raise if ss[1] == "\n"
+        @string.value << (ESC[ss[1]] || ss[1]) unless ss[1] == "\n"
       when ss.scan(/[^\"]+/)
         @string.value << ss.matched
       else

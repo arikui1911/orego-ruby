@@ -1,114 +1,93 @@
 require 'test/unit'
 require 'orego/lexer'
+require 'orego/token'
 
 class TestLexer < Test::Unit::TestCase
-  data(
-    'left paren' => ['(', Orego::Token::LPAREN],
-    'right paren' => [')', Orego::Token::RPAREN],
-    'left bracket' => ['[', Orego::Token::LBRACKET],
-    'right bracket' => [']', Orego::Token::RBRACKET],
-    'left brace' => ['{', Orego::Token::LBRACE],
-    'arrow' => ['->', Orego::Token::ARROW],
-    'comma' => [',', Orego::Token::COMMA],
-    'semicolon' => [';', Orego::Token::SEMICOLON],
-    'colon' => [':', Orego::Token::COLON],
-    'let' => ['=', Orego::Token::LET],
-    'eq' => ['==', Orego::Token::EQ],
-    'ne' => ['!=', Orego::Token::NE],
-    'ge' => ['>=', Orego::Token::GE],
-    'le' => ['<=', Orego::Token::LE],
-    'gt' => ['>', Orego::Token::GT],
-    'lt' => ['<', Orego::Token::LT],
-    'add' => ['+', Orego::Token::ADD],
-    'sub' => ['-', Orego::Token::SUB],
-    'mul' => ['*', Orego::Token::MUL],
-    'div' => ['/', Orego::Token::DIV],
-    'mod' => ['%', Orego::Token::MOD],
-    'add let' => ['+=', Orego::Token::ADD_LET],
-    'sub let' => ['-=', Orego::Token::SUB_LET],
-    'mul let' => ['*=', Orego::Token::MUL_LET],
-    'div let' => ['/=', Orego::Token::DIV_LET],
-    'mod let' => ['%=', Orego::Token::MOD_LET],
-    'bang' => ['!', Orego::Token::BANG],
-    'def' => ['def', Orego::Token::KW_DEF],
-    'if' => ['if', Orego::Token::KW_IF],
-    'else' => ['else', Orego::Token::KW_ELSE],
-    'elsif' => ['elsif', Orego::Token::KW_ELSIF],
-    'while' => ['while', Orego::Token::KW_WHILE],
-    'break' => ['break', Orego::Token::KW_BREAK],
-    'continue' => ['continue', Orego::Token::KW_CONTINUE],
-    'return' => ['return', Orego::Token::KW_RETURN],
-    'true' => ['true', Orego::Token::KW_TRUE],
-    'false' => ['false', Orego::Token::KW_FALSE],
-    'nil' => ['nil', Orego::Token::KW_NIL],
-  )
-  test 'lex statics' do |(src, tag)|
+  include Orego
+
+  data 'left paren',    ['(', Token::LPAREN]
+  data 'right paren',   [')', Token::RPAREN]
+  data 'left bracket',  ['[', Token::LBRACKET]
+  data 'right bracket', [']', Token::RBRACKET]
+  data 'left brace',    ['{', Token::LBRACE]
+  data 'arrow',         ['->', Token::ARROW]
+  data 'comma',         [',', Token::COMMA]
+  data 'semicolon',     [';', Token::SEMICOLON]
+  data 'colon',         [':', Token::COLON]
+  data 'let',           ['=', Token::LET]
+  data 'eq',            ['==', Token::EQ]
+  data 'ne',            ['!=', Token::NE]
+  data 'ge',            ['>=', Token::GE]
+  data 'le',            ['<=', Token::LE]
+  data 'gt',            ['>', Token::GT]
+  data 'lt',            ['<', Token::LT]
+  data 'add',           ['+', Token::ADD]
+  data 'sub',           ['-', Token::SUB]
+  data 'mul',           ['*', Token::MUL]
+  data 'div',           ['/', Token::DIV]
+  data 'mod',           ['%', Token::MOD]
+  data 'add let',       ['+=', Token::ADD_LET]
+  data 'sub let',       ['-=', Token::SUB_LET]
+  data 'mul let',       ['*=', Token::MUL_LET]
+  data 'div let',       ['/=', Token::DIV_LET]
+  data 'mod let',       ['%=', Token::MOD_LET]
+  data 'bang',          ['!', Token::BANG]
+  data 'def',           ['def', Token::KW_DEF]
+  data 'if',            ['if', Token::KW_IF]
+  data 'else',          ['else', Token::KW_ELSE]
+  data 'elsif',         ['elsif', Token::KW_ELSIF]
+  data 'while',         ['while', Token::KW_WHILE]
+  data 'break',         ['break', Token::KW_BREAK]
+  data 'continue',      ['continue', Token::KW_CONTINUE]
+  data 'return',        ['return', Token::KW_RETURN]
+  data 'true',          ['true', Token::KW_TRUE]
+  data 'false',         ['false', Token::KW_FALSE]
+  data 'nil',           ['nil', Token::KW_NIL]
+
+  data 'identifier; basic one',     ['hoge', Token::IDENTIFIER, :hoge]
+  data 'identifier; underbar',      ['_', Token::IDENTIFIER, :_]
+  data 'identifier; one char',      ['x', Token::IDENTIFIER, :x]
+  data 'identifier; with number',   ['x123', Token::IDENTIFIER, :x123]
+  data 'identifier; conc underbar', ['hoge_piyo', Token::IDENTIFIER, :hoge_piyo]
+  data 'identifier; hyphen NG',     ['hoge-piyo', Token::IDENTIFIER, :hoge, 3]
+
+  data 'int literal; basic',            ['666', Token::LITERAL_INT, 666]
+  data 'int literal; zero',             ['0', Token::LITERAL_INT, 0]
+  data 'int literal; consecutive zero', ['0000', Token::LITERAL_INT, 0, 0]
+
+  data 'float literal; basic', ['1.23', Token::LITERAL_FLOAT, 1.23]
+  data 'float literal; zero', ['0.0', Token::LITERAL_FLOAT, 0.0]
+  data 'float literal; consecutive zero in float part', ['1.001', Token::LITERAL_FLOAT, 1.001]
+
+  data 'string literal; basic', ['"Hello"', Token::LITERAL_STRING, 'Hello', 0, 0, 0, 6]
+  data 'string literal; empty', ['""', Token::LITERAL_STRING, '', 0, 0, 0, 1]
+  data 'string literal; escape sequences', [%Q`"\\t\\v\\n\\r\\f\\b\\a\\e\\s"`, Token::LITERAL_STRING, "\t\v\n\r\f\b\a\e\s", 0, 0, 0, 19]
+  data 'string literal; multi line', [<<~EOS, Token::LITERAL_STRING, "Hello,\nOrego!", 0, 0, 1, 6]
+    "Hello,
+    Orego!"
+  EOS
+
+  test 'lex' do |(src, tag, val, *pos)|
+    val ||= src
+    pos = case pos.size
+    when 0
+      [0, 0, 0, src.length-1]
+    when 1
+      [0, 0, 0, pos.first]
+    when 4
+      pos
+    else
+      raise ArgumentError
+    end
     assert_equal(
-      Orego::Token.new(tag, src, Orego::Location.new(0, 0, 0, src.length-1)),
+      Orego::Token.new(tag, val, Orego::Location.new(*pos)),
       Orego::Lexer.new(src).next_token,
     )
   end
 
-  sub_test_case 'identifier' do
-    data(
-      'basic one' => ['hoge', :hoge],
-      'underbar' => ['_', :_],
-      'one char' => ['x', :x],
-      'with number' => ['x123', :x123],
-      'conc underbar' => ['hoge_piyo', :hoge_piyo],
-      'hyphen NG' => ['hoge-piyo', :hoge, 3],
-    )
-    test 'lex' do |(src, val, ec)|
-      ec ||= src.length - 1
-      assert_equal Orego::Token.new(Orego::Token::IDENTIFIER, val, Orego::Location.new(0, 0, 0, ec)), Orego::Lexer.new(src).next_token
-    end
-  end
-
-  sub_test_case 'int literal' do
-    data(
-      'basic' => ['666', 666],
-      'zero' => ['0', 0],
-      'consecutive zero' => ['0000', 0, 0],
-    )
-    test 'lex' do |(src, val, ec)|
-      ec ||= src.length - 1
-      assert_equal(
-        Orego::Token.new(Orego::Token::LITERAL_INT, val, Orego::Location.new(0, 0, 0, ec)),
-        Orego::Lexer.new(src).next_token,
-      )
-    end
-  end
-
-  sub_test_case 'float literal' do
-    data(
-      'basic' => ['1.23', 1.23],
-      'zero' => ['0.0', 0.0],
-      'consecutive zero in float part' => ['1.001', 1.001],
-    )
-    test 'lex' do |(src, val, ec)|
-      ec ||= src.length - 1
-      assert_equal(
-        Orego::Token.new(Orego::Token::LITERAL_FLOAT, val, Orego::Location.new(0, 0, 0, ec)),
-        Orego::Lexer.new(src).next_token,
-      )
-    end
-  end
-
-  sub_test_case 'string literal' do
-    data(
-      'basic' => ['"Hello"', 'Hello', 0, 0, 0, 6],
-      'empty' => ['""', '', 0, 0, 0, 1],
-      'escape sequences' => [%Q`"\\t\\v\\n\\r\\f\\b\\a\\e\\s"`, "\t\v\n\r\f\b\a\e\s", 0, 0, 0, 19],
-      'multi line' => [<<~EOS, "Hello,\nOrego!", 0, 0, 1, 6],
-        "Hello,
-        Orego!"
-      EOS
-    )
-    test 'lex' do |(src, val, *a)|
-      assert_equal(
-        Orego::Token.new(Orego::Token::LITERAL_STRING, val, Orego::Location.new(*a)),
-        Orego::Lexer.new(src).next_token,
-      )
+  test 'invalid character' do
+    assert_raise LexicalError do
+      Orego::Lexer.new('@').next_token
     end
   end
 
